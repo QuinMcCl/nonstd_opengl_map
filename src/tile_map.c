@@ -72,6 +72,11 @@ int __map_pop_loaded_queue(map_t *map)
 
     glGetIntegerv(GL_TEXTURE_BINDING_2D, &prevTexture2D);
 
+    glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+    glPixelStorei(GL_UNPACK_ROW_LENGTH, 0);
+    glPixelStorei(GL_UNPACK_SKIP_PIXELS, 0);
+    glPixelStorei(GL_UNPACK_SKIP_ROWS, 0);
+
     glBindTexture(GL_TEXTURE_2D, map->TID);
     glTexImage2D(GL_TEXTURE_2D, 0, format, tile->width, tile->height, 0, format, GL_UNSIGNED_BYTE, tile->data);
 
