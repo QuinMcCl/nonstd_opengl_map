@@ -38,6 +38,7 @@ extern "C"
 
     struct tile_s
     {
+        pthread_mutex_t tile_mutex;
         map_t *map;
         int state;
         char filename[1024];
@@ -53,7 +54,7 @@ extern "C"
         unsigned int VAO;
         unsigned int VBO;
 
-        unsigned int TID;
+        texture_t map_texture;
 
         task_queue_t *tq;
         queue_t loaded_queue;
