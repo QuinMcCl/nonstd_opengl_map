@@ -24,14 +24,14 @@ extern "C"
     };
 
 #define MAP_DRAW(M) M.draw(&(M))
-#define MAP_RELOAD(M, F) M.reload(&(M), F)
+#define MAP_RELOAD(M, T, F) M.reload(&(M), T, F)
 #define MAP_POP_LOADED(M) M.pop_loaded(&(M))
 
     typedef struct map_s map_t;
     typedef struct tile_s tile_t;
     typedef enum tile_state_e tile_state_t;
     typedef int (*map_draw_func_t)(map_t *map);
-    typedef int (*map_reload_func_t)(map_t *map, const char *);
+    typedef int (*map_reload_func_t)(map_t *map, tile_t *tile, const char *filename);
     typedef int (*map_push_load_func_t)(map_t *map, tile_t *);
     typedef int (*map_pop_loaded_func_t)(map_t *map);
     typedef void (*async_load_func_t)(void *);
@@ -40,6 +40,9 @@ extern "C"
     {
         pthread_mutex_t tile_mutex;
         map_t *map;
+        int xoffset;
+        int yoffset;
+        int zoffset;
         int state;
         char filename[1024];
         int width;
@@ -50,7 +53,7 @@ extern "C"
     struct map_s
     {
         shader_t *shader;
-        tile_t tile;
+        tile_t *tile_array;
         unsigned int VAO;
         unsigned int VBO;
 
@@ -75,6 +78,8 @@ extern "C"
 
     int init_map(
         map_t *map,
+        size_t tile_array_length,
+        tile_t *tile_array,
         task_queue_t *tq,
         size_t loaded_queue_buffer_length,
         void *loaded_queue_buffer,

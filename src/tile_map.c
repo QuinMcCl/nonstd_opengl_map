@@ -94,7 +94,7 @@ int __map_pop_loaded_queue(map_t *map)
         glPixelStorei(GL_UNPACK_ROW_LENGTH, 0);
         glPixelStorei(GL_UNPACK_SKIP_PIXELS, 0);
         glPixelStorei(GL_UNPACK_SKIP_ROWS, 0);
-        glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, tile->width, tile->height, format, GL_UNSIGNED_BYTE, tile->data);
+        glTexSubImage2D(GL_TEXTURE_2D, 0, tile->xoffset, tile->yoffset, tile->width, tile->height, format, GL_UNSIGNED_BYTE, tile->data);
 
         glBindTexture(GL_TEXTURE_2D, prevTextureID);
         glActiveTexture(prevTextureUnit);
@@ -121,32 +121,17 @@ int __map_push_load_queue(map_t *map, tile_t *tile)
     return retval;
 }
 
-int __map_reload(map_t *map, const char *filename)
+int __map_reload(map_t *map, tile_t *tile, const char *filename)
 {
     int retval = 0;
-    CHECK_ERR(pthread_mutex_lock(&(map->tile.tile_mutex)), strerror(errno), return errno);
-    if (map->tile.state == UNLOADED)
+    CHECK_ERR(pthread_mutex_lock(&(tile->tile_mutex)), strerror(errno), return errno);
+    snprintf(tile->filename, 1024, "%s", filename);
+    if (tile->state != INLOAD_QUEUE)
     {
-        snprintf(map->tile.filename, 1024, "%s", filename);
-        retval = map->push_load(map, &(map->tile));
+        tile->state = UNLOADED;
+        retval = map->push_load(map, tile);
     }
-    else if (map->tile.state == LOADED)
-    {
-        snprintf(map->tile.filename, 1024, "%s", filename);
-        map->tile.state = UNLOADED;
-        retval = map->push_load(map, &(map->tile));
-    }
-    else if (map->tile.state == INLOAD_QUEUE)
-    {
-        snprintf(map->tile.filename, 1024, "%s", filename);
-    }
-    else if (map->tile.state == INLOADED_QUEUE)
-    {
-        snprintf(map->tile.filename, 1024, "%s", filename);
-        map->tile.state = UNLOADED;
-        retval = map->push_load(map, &(map->tile));
-    }
-    CHECK_ERR(pthread_mutex_unlock(&(map->tile.tile_mutex)), strerror(errno), return errno);
+    CHECK_ERR(pthread_mutex_unlock(&(tile->tile_mutex)), strerror(errno), return errno);
     return retval;
 }
 
@@ -158,6 +143,8 @@ int __map_reload(map_t *map, const char *filename)
 
 int init_map(
     map_t *map,
+    size_t tile_array_length,
+    tile_t *tile_array,
     task_queue_t *tq,
     size_t loaded_queue_buffer_length,
     void *loaded_queue_buffer,
@@ -189,8 +176,11 @@ int init_map(
 
     CHECK_ERR(pthread_mutex_lock(&(map->map_texture.mutex_lock)), strerror(errno), return errno);
 
-    map->map_texture.width = 256;
-    map->map_texture.height = 256;
+    // map->map_texture.width = 8192;
+    // map->map_texture.height = 8192;
+    // TODO FIX?
+    map->map_texture.width = 256 * 16;
+    map->map_texture.height = 256 * 16;
     map->map_texture.channels = 4;
     map->map_texture.ID = GL_FALSE;
     map->map_texture.unit = -1;
@@ -207,11 +197,11 @@ int init_map(
     glBindTexture(GL_TEXTURE_2D, map->map_texture.ID);
     glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, map->map_texture.width, map->map_texture.height, 0, GL_RGBA, GL_UNSIGNED_BYTE, NULL);
 
-    glGenerateMipmap(GL_TEXTURE_2D);
+    // glGenerateMipmap(GL_TEXTURE_2D);
 
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
 
     glBindTexture(GL_TEXTURE_2D, prevTextureID);
@@ -226,7 +216,18 @@ int init_map(
     map->VAO = VAO;
     map->VBO = VBO;
 
-    map->tile.map = map;
+    map->tile_array = tile_array;
+
+    for (size_t tile_index = 0; tile_index < tile_array_length; tile_index++)
+    {
+        map->tile_array[tile_index].map = map;
+        // TODO FIX?
+        map->tile_array[tile_index].xoffset = (tile_index % 16) * 256;
+        map->tile_array[tile_index].yoffset = (tile_index / 16) * 256;
+        map->tile_array[tile_index].zoffset = 0;
+        map->tile_array[tile_index].state = UNLOADED;
+        map->push_load(map, &(map->tile_array[tile_index]));
+    }
 
     map->draw = draw == NULL ? DEFAULT_MAP_DRAW : draw;
     map->reload = reload == NULL ? DEFAULT_MAP_RELOAD : reload;
