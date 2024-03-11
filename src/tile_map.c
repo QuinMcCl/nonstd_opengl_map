@@ -50,13 +50,19 @@ void __map_async_load(void *args)
     }
 
     stbi_set_flip_vertically_on_load(1);
-    tile->data = stbi_load(tile->filename, &(tile->width), &(tile->height), &(tile->channels), 0);
+    char filename[1024] = {0};
+    snprintf(filename, 1024, "%s/%d/%d/%d.png", tile->map->root_dir, tile->z_index, tile->x_index, tile->y_index);
+    tile->data = stbi_load(filename, &(tile->width), &(tile->height), &(tile->channels), 0);
     if (tile->data != NULL)
     {
         if (!QUEUE_PUSH(tile->map->loaded_queue, tile, 1))
         {
             tile->state = INLOADED_QUEUE;
         }
+    }
+    else
+    {
+        tile->state = UNLOADED;
     }
     CHECK_ERR(pthread_mutex_unlock(&(tile->tile_mutex)), strerror(errno), return);
 }
@@ -94,7 +100,7 @@ int __map_pop_loaded_queue(map_t *map)
         glPixelStorei(GL_UNPACK_ROW_LENGTH, 0);
         glPixelStorei(GL_UNPACK_SKIP_PIXELS, 0);
         glPixelStorei(GL_UNPACK_SKIP_ROWS, 0);
-        glTexSubImage2D(GL_TEXTURE_2D, 0, tile->xoffset, tile->yoffset, tile->width, tile->height, format, GL_UNSIGNED_BYTE, tile->data);
+        glTexSubImage2D(GL_TEXTURE_2D, 0, tile->x_index * tile->width, tile->y_index * tile->height, tile->width, tile->height, format, GL_UNSIGNED_BYTE, tile->data);
 
         glBindTexture(GL_TEXTURE_2D, prevTextureID);
         glActiveTexture(prevTextureUnit);
@@ -121,11 +127,10 @@ int __map_push_load_queue(map_t *map, tile_t *tile)
     return retval;
 }
 
-int __map_reload(map_t *map, tile_t *tile, const char *filename)
+int __map_reload(map_t *map, tile_t *tile)
 {
     int retval = 0;
     CHECK_ERR(pthread_mutex_lock(&(tile->tile_mutex)), strerror(errno), return errno);
-    snprintf(tile->filename, 1024, "%s", filename);
     if (tile->state != INLOAD_QUEUE)
     {
         tile->state = UNLOADED;
@@ -143,6 +148,7 @@ int __map_reload(map_t *map, tile_t *tile, const char *filename)
 
 int init_map(
     map_t *map,
+    const char *root_dir,
     size_t tile_array_length,
     tile_t *tile_array,
     task_queue_t *tq,
@@ -157,6 +163,8 @@ int init_map(
     map_pop_loaded_func_t pop_loaded,
     async_load_func_t async_load)
 {
+    map->root_dir = root_dir;
+
     unsigned int VAO;
     unsigned int VBO;
 
@@ -218,21 +226,22 @@ int init_map(
 
     map->tile_array = tile_array;
 
-    for (size_t tile_index = 0; tile_index < tile_array_length; tile_index++)
-    {
-        map->tile_array[tile_index].map = map;
-        // TODO FIX?
-        map->tile_array[tile_index].xoffset = (tile_index % 16) * 256;
-        map->tile_array[tile_index].yoffset = (tile_index / 16) * 256;
-        map->tile_array[tile_index].zoffset = 0;
-        map->tile_array[tile_index].state = UNLOADED;
-        map->push_load(map, &(map->tile_array[tile_index]));
-    }
-
     map->draw = draw == NULL ? DEFAULT_MAP_DRAW : draw;
     map->reload = reload == NULL ? DEFAULT_MAP_RELOAD : reload;
     map->push_load = push_load == NULL ? DEFAULT_MAP_PUSH_LOAD : push_load;
     map->pop_loaded = pop_loaded == NULL ? DEFAULT_MAP_POP_LOADED : pop_loaded;
     map->async_load = async_load == NULL ? DEFAULT_MAP_ASYNC_LOAD : async_load;
+
+    for (size_t tile_index = 0; tile_index < tile_array_length; tile_index++)
+    {
+        map->tile_array[tile_index].map = map;
+        // TODO FIX?
+        map->tile_array[tile_index].x_index = (tile_index / 16);
+        map->tile_array[tile_index].y_index = (tile_index % 16);
+        map->tile_array[tile_index].z_index = 4;
+        map->tile_array[tile_index].state = UNLOADED;
+        map->push_load(map, &(map->tile_array[tile_index]));
+    }
+
     return 0;
 }

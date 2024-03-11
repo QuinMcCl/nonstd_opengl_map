@@ -31,7 +31,7 @@ extern "C"
     typedef struct tile_s tile_t;
     typedef enum tile_state_e tile_state_t;
     typedef int (*map_draw_func_t)(map_t *map);
-    typedef int (*map_reload_func_t)(map_t *map, tile_t *tile, const char *filename);
+    typedef int (*map_reload_func_t)(map_t *map, tile_t *tile);
     typedef int (*map_push_load_func_t)(map_t *map, tile_t *);
     typedef int (*map_pop_loaded_func_t)(map_t *map);
     typedef void (*async_load_func_t)(void *);
@@ -40,11 +40,10 @@ extern "C"
     {
         pthread_mutex_t tile_mutex;
         map_t *map;
-        int xoffset;
-        int yoffset;
-        int zoffset;
+        int x_index;
+        int y_index;
+        int z_index;
         int state;
-        char filename[1024];
         int width;
         int height;
         int channels;
@@ -52,6 +51,7 @@ extern "C"
     };
     struct map_s
     {
+        const char *root_dir;
         shader_t *shader;
         tile_t *tile_array;
         unsigned int VAO;
@@ -78,6 +78,7 @@ extern "C"
 
     int init_map(
         map_t *map,
+        const char *root_dir,
         size_t tile_array_length,
         tile_t *tile_array,
         task_queue_t *tq,
