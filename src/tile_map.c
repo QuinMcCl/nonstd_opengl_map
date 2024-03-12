@@ -8,6 +8,7 @@
 #include "nonstd.h"
 #include "tile_map.h"
 
+#define ON_ERROR return errno;
 const map_vertex_t vertices[] = {
     // positions          // colors           // texture coords
     {{-1.0f, 1.0f, 1.0f}, {1.0f, 1.0f, 0.0f}, {0.0f, 1.0f}},  // top left
@@ -17,7 +18,7 @@ const map_vertex_t vertices[] = {
 };
 int __map_draw(map_t *map)
 {
-    CHECK_ERR(shader_use(map->shader), strerror(errno), return errno);
+    CHECK_ERR(shader_use(map->shader));
 
     GLint prevTextureUnit = GL_TEXTURE0;
     glGetIntegerv(GL_ACTIVE_TEXTURE, &prevTextureUnit);
@@ -27,7 +28,7 @@ int __map_draw(map_t *map)
     glGetIntegerv(GL_TEXTURE_BINDING_2D, &prevTextureID);
     glBindTexture(GL_TEXTURE_2D, map->map_texture.ID);
 
-    CHECK_ERR(shader_set(map->shader, "MAP_TEXTURE", I1, 1, &map->map_texture.unit), strerror(errno), return errno);
+    CHECK_ERR(shader_set(map->shader, "MAP_TEXTURE", I1, 1, &map->map_texture.unit));
     glBindVertexArray(map->VAO);
 
     glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
@@ -38,11 +39,14 @@ int __map_draw(map_t *map)
     return 0;
 }
 
+#undef ON_ERROR
+#define ON_ERROR return;
+
 void __map_async_load(void *args)
 {
     assert(args);
     tile_t *tile = args;
-    CHECK_ERR(pthread_mutex_lock(&(tile->tile_mutex)), strerror(errno), return);
+    CHECK_ERR(pthread_mutex_lock(&(tile->tile_mutex)));
     if (tile->data != NULL)
     {
         stbi_image_free(tile->data);
@@ -64,20 +68,23 @@ void __map_async_load(void *args)
     {
         tile->state = UNLOADED;
     }
-    CHECK_ERR(pthread_mutex_unlock(&(tile->tile_mutex)), strerror(errno), return);
+    CHECK_ERR(pthread_mutex_unlock(&(tile->tile_mutex)));
 }
 
-int __map_pop_loaded_queue(map_t *map)
-{
-    int retval = 0;
-    tile_t *tile = NULL;
-    retval = QUEUE_POP(map->loaded_queue, tile, 0);
-    if (retval)
-        return retval;
-    if (tile == NULL)
-        return 0;
+#undef ON_ERROR
+#define ON_ERROR return errno;
 
-    CHECK_ERR(pthread_mutex_lock(&(tile->tile_mutex)), strerror(errno), return errno);
+int __map_pop_loaded_queue(map_t *map, int *stop)
+{
+    tile_t *tile = NULL;
+    CHECK_ERR(QUEUE_POP(map->loaded_queue, tile, 0));
+    if (tile == NULL)
+    {
+        *stop = 1;
+        return 0;
+    }
+
+    CHECK_ERR(pthread_mutex_lock(&(tile->tile_mutex)));
     if (tile->state == INLOADED_QUEUE)
     {
         GLenum format = GL_FALSE;
@@ -106,7 +113,7 @@ int __map_pop_loaded_queue(map_t *map)
         glActiveTexture(prevTextureUnit);
         tile->state = LOADED;
     }
-    CHECK_ERR(pthread_mutex_unlock(&(tile->tile_mutex)), strerror(errno), return errno);
+    CHECK_ERR(pthread_mutex_unlock(&(tile->tile_mutex)));
     return 0;
 }
 
@@ -130,13 +137,13 @@ int __map_push_load_queue(map_t *map, tile_t *tile)
 int __map_reload(map_t *map, tile_t *tile)
 {
     int retval = 0;
-    CHECK_ERR(pthread_mutex_lock(&(tile->tile_mutex)), strerror(errno), return errno);
+    CHECK_ERR(pthread_mutex_lock(&(tile->tile_mutex)));
     if (tile->state != INLOAD_QUEUE)
     {
         tile->state = UNLOADED;
         retval = map->push_load(map, tile);
     }
-    CHECK_ERR(pthread_mutex_unlock(&(tile->tile_mutex)), strerror(errno), return errno);
+    CHECK_ERR(pthread_mutex_unlock(&(tile->tile_mutex)));
     return retval;
 }
 
@@ -182,7 +189,7 @@ int init_map(
     X_ATTRIBUTES
 #undef X
 
-    CHECK_ERR(pthread_mutex_lock(&(map->map_texture.mutex_lock)), strerror(errno), return errno);
+    CHECK_ERR(pthread_mutex_lock(&(map->map_texture.mutex_lock)));
 
     // map->map_texture.width = 8192;
     // map->map_texture.height = 8192;
@@ -215,9 +222,9 @@ int init_map(
     glBindTexture(GL_TEXTURE_2D, prevTextureID);
     glActiveTexture(prevTextureUnit);
 
-    CHECK_ERR(pthread_mutex_unlock(&(map->map_texture.mutex_lock)), strerror(errno), return errno);
+    CHECK_ERR(pthread_mutex_unlock(&(map->map_texture.mutex_lock)));
 
-    CHECK_ERR(queue_init(&(map->loaded_queue), loaded_queue_buffer_length, loaded_queue_buffer, sizeof(tile_t *), 8UL, loaded_push_func, loaded_pop_func), strerror(errno), return errno);
+    CHECK_ERR(queue_init(&(map->loaded_queue), loaded_queue_buffer_length, loaded_queue_buffer, sizeof(tile_t *), 8UL, loaded_push_func, loaded_pop_func));
 
     map->tq = tq;
     map->shader = shader;
@@ -245,3 +252,5 @@ int init_map(
 
     return 0;
 }
+
+#undef ON_ERROR

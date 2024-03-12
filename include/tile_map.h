@@ -25,7 +25,7 @@ extern "C"
 
 #define MAP_DRAW(M) M.draw(&(M))
 #define MAP_RELOAD(M, T, F) M.reload(&(M), T, F)
-#define MAP_POP_LOADED(M) M.pop_loaded(&(M))
+#define MAP_POP_LOADED(M, S) M.pop_loaded(&(M), S)
 
     typedef struct map_s map_t;
     typedef struct tile_s tile_t;
@@ -33,7 +33,7 @@ extern "C"
     typedef int (*map_draw_func_t)(map_t *map);
     typedef int (*map_reload_func_t)(map_t *map, tile_t *tile);
     typedef int (*map_push_load_func_t)(map_t *map, tile_t *);
-    typedef int (*map_pop_loaded_func_t)(map_t *map);
+    typedef int (*map_pop_loaded_func_t)(map_t *map, int *stop);
     typedef void (*async_load_func_t)(void *);
 
     struct tile_s
