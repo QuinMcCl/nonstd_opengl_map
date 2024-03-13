@@ -9,6 +9,27 @@
 #include "tile_map.h"
 
 #define ON_ERROR return errno;
+
+// #define GLM_E         2.71828182845904523536028747135266250   /* e           */
+// #define GLM_LOG2E     1.44269504088896340735992468100189214   /* log2(e)     */
+// #define GLM_LOG10E    0.434294481903251827651128918916605082  /* log10(e)    */
+// #define GLM_LN2       0.693147180559945309417232121458176568  /* loge(2)     */
+// #define GLM_LN10      2.30258509299404568401799145468436421   /* loge(10)    */
+// #define GLM_PI        3.14159265358979323846264338327950288   /* pi          */
+// #define GLM_PI_2      1.57079632679489661923132169163975144   /* pi/2        */
+// #define GLM_PI_4      0.785398163397448309615660845819875721  /* pi/4        */
+
+void web_merc_forward(struct Coordinate_Point *out, const struct ellipsoid E, const struct Coordinate_Operation_Parameter params, const struct Coordinate_Point in)
+{
+    out->E = params.FE + E.a * (in.lon - params.lon_O);
+    out->N = params.FN + E.a * log(tan(GLM_PI_4 + in.lat / 2.0f));
+}
+void web_merc_reverse(struct Coordinate_Point *out, const struct ellipsoid E, const struct Coordinate_Operation_Parameter params, const struct Coordinate_Point in)
+{
+    out->lon = ((in.E - params.FE) / E.a) + params.lon_O;
+    out->lat = GLM_PI_2 - 2.0f * atan(pow(GLM_E, (params.FN - in.N) / E.a));
+}
+
 const map_vertex_t vertices[] = {
     // positions          // colors           // texture coords
     {{-1.0f, 1.0f, 1.0f}, {1.0f, 1.0f, 0.0f}, {0.0f, 1.0f}},  // top left
@@ -19,6 +40,10 @@ const map_vertex_t vertices[] = {
 int __map_draw(map_t *map)
 {
     CHECK_ERR(shader_use(map->shader));
+    CHECK_ERR(nonstd_opengl_ubo_fill(&(map->uboSourceProjection), &(map->source_projection), sizeof(map->source_projection), 0));
+    CHECK_ERR(nonstd_opengl_ubo_fill(&(map->uboTargetProjection), &(map->target_projection), sizeof(map->target_projection), 0));
+    CHECK_ERR(nonstd_opengl_ubo_fill(&(map->uboSourceEllipsoid), &(map->source_Ellipsoid), sizeof(map->source_Ellipsoid), 0));
+    CHECK_ERR(nonstd_opengl_ubo_fill(&(map->uboTargetEllipsoid), &(map->target_Ellipsoid), sizeof(map->target_Ellipsoid), 0));
 
     GLint prevTextureUnit = GL_TEXTURE0;
     glGetIntegerv(GL_ACTIVE_TEXTURE, &prevTextureUnit);
@@ -36,6 +61,23 @@ int __map_draw(map_t *map)
     glBindVertexArray(0);
     glBindTexture(GL_TEXTURE_2D, prevTextureID);
     glActiveTexture(prevTextureUnit);
+    return 0;
+}
+
+int __map_move(map_t *map, float xOffset, float yOffset, float zOffset)
+{
+    switch (map->target_projection.type)
+    {
+    case 0:
+        break;
+    case 1:
+        map->target_projection.FE += xOffset;
+        map->target_projection.FN += yOffset;
+        map->target_projection.K_O += zOffset;
+        break;
+    default:
+        break;
+    }
     return 0;
 }
 
@@ -151,6 +193,7 @@ int __map_reload(map_t *map, tile_t *tile)
 #define DEFAULT_MAP_RELOAD __map_reload
 #define DEFAULT_MAP_PUSH_LOAD __map_push_load_queue
 #define DEFAULT_MAP_POP_LOADED __map_pop_loaded_queue
+#define DEFAULT_MAP_MOVE __map_move
 #define DEFAULT_MAP_ASYNC_LOAD __map_async_load
 
 int init_map(
@@ -168,9 +211,9 @@ int init_map(
     map_reload_func_t reload,
     map_push_load_func_t push_load,
     map_pop_loaded_func_t pop_loaded,
+    map_move_func_t move,
     async_load_func_t async_load)
 {
-    map->root_dir = root_dir;
 
     unsigned int VAO;
     unsigned int VBO;
@@ -188,44 +231,56 @@ int init_map(
     glEnableVertexAttribArray(INDEX);
     X_ATTRIBUTES
 #undef X
+    // TODO CLEAN THESE UP ON EXIT
+    CHECK_ERR(shader_use(shader));
+    CHECK_ERR(nonstd_opengl_ubo_init(&(map->uboSourceProjection), "uboSourceProjection", sizeof(map->source_projection), GL_STREAM_DRAW));
+    CHECK_ERR(nonstd_opengl_ubo_init(&(map->uboTargetProjection), "uboTargetProjection", sizeof(map->target_projection), GL_STREAM_DRAW));
+    CHECK_ERR(nonstd_opengl_ubo_init(&(map->uboSourceEllipsoid), "uboSourceEllipsoid", sizeof(map->source_Ellipsoid), GL_STREAM_DRAW));
+    CHECK_ERR(nonstd_opengl_ubo_init(&(map->uboTargetEllipsoid), "uboTargetEllipsoid", sizeof(map->target_Ellipsoid), GL_STREAM_DRAW));
+
+    CHECK_ERR(shader_bindBuffer(shader, map->uboSourceProjection.name, map->uboSourceProjection.bindingPoint));
+    CHECK_ERR(shader_bindBuffer(shader, map->uboTargetProjection.name, map->uboTargetProjection.bindingPoint));
+    CHECK_ERR(shader_bindBuffer(shader, map->uboSourceEllipsoid.name, map->uboSourceEllipsoid.bindingPoint));
+    CHECK_ERR(shader_bindBuffer(shader, map->uboTargetEllipsoid.name, map->uboTargetEllipsoid.bindingPoint));
 
     CHECK_ERR(pthread_mutex_lock(&(map->map_texture.mutex_lock)));
+    {
+        // map->map_texture.width = 8192;
+        // map->map_texture.height = 8192;
+        // TODO FIX?
+        map->map_texture.width = 256 * 16;
+        map->map_texture.height = 256 * 16;
+        map->map_texture.channels = 4;
+        map->map_texture.ID = GL_FALSE;
+        map->map_texture.unit = -1;
 
-    // map->map_texture.width = 8192;
-    // map->map_texture.height = 8192;
-    // TODO FIX?
-    map->map_texture.width = 256 * 16;
-    map->map_texture.height = 256 * 16;
-    map->map_texture.channels = 4;
-    map->map_texture.ID = GL_FALSE;
-    map->map_texture.unit = -1;
+        glGenTextures(1, &(map->map_texture.ID));
 
-    glGenTextures(1, &(map->map_texture.ID));
+        GLint prevTextureUnit = GL_TEXTURE0;
+        glGetIntegerv(GL_ACTIVE_TEXTURE, &prevTextureUnit);
+        glActiveTexture(GL_TEXTURE0);
 
-    GLint prevTextureUnit = GL_TEXTURE0;
-    glGetIntegerv(GL_ACTIVE_TEXTURE, &prevTextureUnit);
-    glActiveTexture(GL_TEXTURE0);
+        GLint prevTextureID = 0;
+        glGetIntegerv(GL_TEXTURE_BINDING_2D, &prevTextureID);
 
-    GLint prevTextureID = 0;
-    glGetIntegerv(GL_TEXTURE_BINDING_2D, &prevTextureID);
+        glBindTexture(GL_TEXTURE_2D, map->map_texture.ID);
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, map->map_texture.width, map->map_texture.height, 0, GL_RGBA, GL_UNSIGNED_BYTE, NULL);
 
-    glBindTexture(GL_TEXTURE_2D, map->map_texture.ID);
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, map->map_texture.width, map->map_texture.height, 0, GL_RGBA, GL_UNSIGNED_BYTE, NULL);
+        // glGenerateMipmap(GL_TEXTURE_2D);
 
-    // glGenerateMipmap(GL_TEXTURE_2D);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
 
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-
-    glBindTexture(GL_TEXTURE_2D, prevTextureID);
-    glActiveTexture(prevTextureUnit);
-
+        glBindTexture(GL_TEXTURE_2D, prevTextureID);
+        glActiveTexture(prevTextureUnit);
+    }
     CHECK_ERR(pthread_mutex_unlock(&(map->map_texture.mutex_lock)));
 
     CHECK_ERR(queue_init(&(map->loaded_queue), loaded_queue_buffer_length, loaded_queue_buffer, sizeof(tile_t *), 8UL, loaded_push_func, loaded_pop_func));
 
+    map->root_dir = root_dir;
     map->tq = tq;
     map->shader = shader;
     map->VAO = VAO;
@@ -237,6 +292,7 @@ int init_map(
     map->reload = reload == NULL ? DEFAULT_MAP_RELOAD : reload;
     map->push_load = push_load == NULL ? DEFAULT_MAP_PUSH_LOAD : push_load;
     map->pop_loaded = pop_loaded == NULL ? DEFAULT_MAP_POP_LOADED : pop_loaded;
+    map->move = move == NULL ? DEFAULT_MAP_MOVE : move;
     map->async_load = async_load == NULL ? DEFAULT_MAP_ASYNC_LOAD : async_load;
 
     for (size_t tile_index = 0; tile_index < tile_array_length; tile_index++)

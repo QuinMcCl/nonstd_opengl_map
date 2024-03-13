@@ -26,14 +26,25 @@ extern "C"
 #define MAP_DRAW(M) M.draw(&(M))
 #define MAP_RELOAD(M, T, F) M.reload(&(M), T, F)
 #define MAP_POP_LOADED(M, S) M.pop_loaded(&(M), S)
+#define MAP_MOVE(M, X, Y, Z) M.move(&(M), X, Y, Z)
 
-    typedef struct map_s map_t;
+    enum tile_state_e
+    {
+        UNLOADED,
+        LOADED,
+        INLOAD_QUEUE,
+        INLOADED_QUEUE
+    };
+    typedef struct ellipsoid ellipsoid_t;
+    typedef struct Coordinate_Operation_Parameter Coordinate_Operation_Parameter_t;
     typedef struct tile_s tile_t;
+    typedef struct map_s map_t;
     typedef enum tile_state_e tile_state_t;
     typedef int (*map_draw_func_t)(map_t *map);
     typedef int (*map_reload_func_t)(map_t *map, tile_t *tile);
     typedef int (*map_push_load_func_t)(map_t *map, tile_t *);
     typedef int (*map_pop_loaded_func_t)(map_t *map, int *stop);
+    typedef int (*map_move_func_t)(map_t *map, float x, float y, float z);
     typedef void (*async_load_func_t)(void *);
 
     struct tile_s
@@ -49,11 +60,96 @@ extern "C"
         int channels;
         unsigned char *data;
     };
+    struct ellipsoid
+    {
+        union
+        {
+            float semi_major_axis;
+            float a;
+        };
+        union
+        {
+            float semi_minor_axis;
+            float b;
+        };
+    };
+    struct Coordinate_Point
+    {
+        union
+        {
+            float lon;
+            float E;
+        };
+        union
+        {
+            float lat;
+            float N;
+        };
+    };
+    struct Coordinate_Operation_Parameter
+    {
+        int type;
+        union
+        {
+            float p1;
+            float lat_O; // Latitude_natural_origin
+            float lat_C; // Latitude_projection_centre
+            float lat_1; // Latitude_1st_standard_parallel
+        };
+        union
+        {
+            float p2;
+            float lon_O; // Longitude of natural origin
+            float lon_C; // Longitude of projection centre
+            float lat_2; // Latitude of 2nd standard parallel
+        };
+        union
+        {
+            float p3;
+            float K_O; // Scale factor at natural origin
+            float K_C; // Scale factor on initial line
+        };
+        union
+        {
+            float p4;
+            float FE;  // False easting
+            float E_F; // Easting at false origin
+            float E_C; // Easting at projection centre
+        };
+        union
+        {
+            float p5;
+            float FN;  // False northing
+            float N_F; // Northing at false origin
+            float N_C; // Northing at projection centre
+        };
+        union
+        {
+            float p6;
+            float lat_F; // Latitude of false origin
+            float A_C;   // Azimuth of initial line
+        };
+        union
+        {
+            float p7;
+            float lon_F; // Latitude of false origin
+            float Y_C;   // Angle from Rectified to Skewed grid
+        };
+    };
     struct map_s
     {
         const char *root_dir;
-        shader_t *shader;
+        ellipsoid_t source_Ellipsoid;
+        ellipsoid_t target_Ellipsoid;
+        Coordinate_Operation_Parameter_t source_projection;
+        Coordinate_Operation_Parameter_t target_projection;
+        nonstd_opengl_ubo_t uboSourceEllipsoid;
+        nonstd_opengl_ubo_t uboTargetEllipsoid;
+        nonstd_opengl_ubo_t uboSourceProjection;
+        nonstd_opengl_ubo_t uboTargetProjection;
+
         tile_t *tile_array;
+        shader_t *shader;
         unsigned int VAO;
         unsigned int VBO;
 
@@ -66,14 +162,8 @@ extern "C"
         map_reload_func_t reload;
         map_push_load_func_t push_load;
         map_pop_loaded_func_t pop_loaded;
+        map_move_func_t move;
         async_load_func_t async_load;
-    };
-    enum tile_state_e
-    {
-        UNLOADED,
-        LOADED,
-        INLOAD_QUEUE,
-        INLOADED_QUEUE
     };
 
     int init_map(
@@ -91,6 +181,7 @@ extern "C"
         map_reload_func_t reload,
         map_push_load_func_t push_load,
         map_pop_loaded_func_t pop_loaded,
+        map_move_func_t move,
         async_load_func_t async_load);
 #ifdef __cplusplus
 } /* extern "C" */
